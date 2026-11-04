@@ -1,0 +1,20 @@
+{
+    "name": "flowforge/framework",
+    "description": "FlowForge - A DIY PHP microframework for workflow and approval systems",
+    "type": "project",
+    "license": "MIT",
+    "require": {
+        "php": ">=8.1"
+    },
+    "autoload": {
+        "psr-4": {
+            "FlowForge\\": "src/",
+            "App\\": "app/"
+        }
+    },
+    "scripts": {
+        "test": "php tests/run.php",
+        "seed": "php database/seed.php",
+        "serve": "php -S 127.0.0.1:8000 -t public"
+    }
+}
