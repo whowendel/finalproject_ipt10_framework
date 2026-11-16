@@ -7,6 +7,7 @@ namespace App\Controllers;
 use App\Repositories\ApprovalHistoryRepository;
 use App\Repositories\RequestRepository;
 use App\Services\AuthService;
+use App\Services\HolidayService;
 use App\Services\WorkflowService;
 use FlowForge\Core\Request;
 use FlowForge\Core\Response;
@@ -24,13 +25,16 @@ class RequestController
     private ApprovalHistoryRepository $historyRepo;
     private AuthService $authService;
     private WorkflowService $workflowService;
+    private HolidayService $holidays;
 
     public function __construct(
         ?RequestRepository $requestRepo = null,
         ?ApprovalHistoryRepository $historyRepo = null,
         ?AuthService $authService = null,
-        ?WorkflowService $workflowService = null
+        ?WorkflowService $workflowService = null,
+        ?HolidayService $holidays = null
     ) {
+        $this->holidays = $holidays ?? new HolidayService();
         $this->requestRepo = $requestRepo ?? new RequestRepository();
         $this->historyRepo = $historyRepo ?? new ApprovalHistoryRepository();
         $this->authService = $authService ?? new AuthService();
@@ -58,6 +62,7 @@ class RequestController
             'title' => 'Activity Requests - FlowForge',
             'requests' => $requests,
             'user' => $user,
+            'holidayNames' => $this->holidays->namesForDates(array_map(fn($r) => $r->event_date, $requests)),
         ], 'layouts/main'));
     }
 
@@ -77,6 +82,8 @@ class RequestController
             'title' => 'New Activity Request - FlowForge',
             'old' => [],
             'errors' => [],
+            'upcomingHolidays' => $this->holidays->upcoming(5),
+            'holidayCountry' => $this->holidays->country(),
         ], 'layouts/main'));
     }
 
@@ -111,6 +118,8 @@ class RequestController
                 'title' => 'New Activity Request - FlowForge',
                 'old' => $input,
                 'errors' => $validator->errors(),
+                'upcomingHolidays' => $this->holidays->upcoming(5),
+                'holidayCountry' => $this->holidays->country(),
             ], 'layouts/main'), 422);
         }
 
@@ -125,6 +134,7 @@ class RequestController
         ]);
 
         $_SESSION['_flash']['success'] = 'Activity request draft created successfully!';
+        $this->flashHolidayWarning($input['event_date']);
         return Response::redirect('/requests/' . $newId);
     }
 
@@ -158,7 +168,126 @@ class RequestController
             'request' => $activityRequest,
             'history' => $history,
             'user' => $user,
+            'holidayCheck' => $this->holidays->check($activityRequest->event_date),
+            'holidayCountry' => $this->holidays->country(),
         ], 'layouts/main'));
+    }
+
+    public function edit(Request $request): Response
+    {
+        $user = $this->authService->user();
+        $item = $this->findEditableDraft((int)$request->param('id'), $user);
+        if ($item instanceof Response) {
+            return $item;
+        }
+
+        return Response::html(View::render('requests/edit', [
+            'title' => "Edit Request #{$item->id} - FlowForge",
+            'request' => $item,
+            'old' => $item->toArray(),
+            'errors' => [],
+            'upcomingHolidays' => $this->holidays->upcoming(5),
+            'holidayCountry' => $this->holidays->country(),
+        ], 'layouts/main'));
+    }
+
+    public function update(Request $request): Response
+    {
+        $user = $this->authService->user();
+        $item = $this->findEditableDraft((int)$request->param('id'), $user);
+        if ($item instanceof Response) {
+            return $item;
+        }
+
+        $input = $this->draftInput($request);
+        $validator = Validator::make($input, self::DRAFT_RULES);
+
+        if ($validator->fails()) {
+            return Response::html(View::render('requests/edit', [
+                'title' => "Edit Request #{$item->id} - FlowForge",
+                'request' => $item,
+                'old' => $input,
+                'errors' => $validator->errors(),
+                'upcomingHolidays' => $this->holidays->upcoming(5),
+                'holidayCountry' => $this->holidays->country(),
+            ], 'layouts/main'), 422);
+        }
+
+        $this->requestRepo->updateDraft($item->id, $input);
+
+        $_SESSION['_flash']['success'] = 'Draft updated successfully.';
+        $this->flashHolidayWarning($input['event_date']);
+        return Response::redirect('/requests/' . $item->id);
+    }
+
+    public function destroy(Request $request): Response
+    {
+        $user = $this->authService->user();
+        $item = $this->findEditableDraft((int)$request->param('id'), $user);
+        if ($item instanceof Response) {
+            return $item;
+        }
+
+        $this->requestRepo->deleteDraft($item->id);
+
+        $_SESSION['_flash']['info'] = "Draft \"{$item->title}\" was deleted.";
+        return Response::redirect('/requests');
+    }
+
+    private const DRAFT_RULES = [
+        'title' => 'required|max:200',
+        'description' => 'required|max:2000',
+        'event_date' => 'required|date',
+        'venue' => 'required|max:200',
+    ];
+
+    /**
+     * Mass-assignment protection: only these four fields are ever read from input.
+     */
+    private function draftInput(Request $request): array
+    {
+        return [
+            'title' => trim((string)$request->input('title', '')),
+            'description' => trim((string)$request->input('description', '')),
+            'event_date' => trim((string)$request->input('event_date', '')),
+            'venue' => trim((string)$request->input('venue', '')),
+        ];
+    }
+
+    /**
+     * Load a draft that the current user owns, or return the error response to send.
+     */
+    private function findEditableDraft(int $id, ?\App\Models\User $user): \App\Models\ActivityRequest|Response
+    {
+        $item = $this->requestRepo->findById($id);
+
+        if (!$item) {
+            return Response::html(View::render('errors/404', ['message' => "Request #{$id} was not found."]), 404);
+        }
+        if ($user === null || $item->user_id !== $user->id) {
+            return Response::html(View::render('errors/403', ['message' => 'You can only change your own requests.']), 403);
+        }
+        if (!$item->isDraft()) {
+            $_SESSION['_flash']['error'] = 'Only drafts can be edited or deleted. This request is already ' . $item->status . '.';
+            return Response::redirect('/requests/' . $id);
+        }
+
+        return $item;
+    }
+
+    /**
+     * Warn (without blocking) when the chosen date is a public holiday.
+     */
+    private function flashHolidayWarning(string $date): void
+    {
+        $check = $this->holidays->check($date);
+        if ($check['ok'] && $check['is_holiday']) {
+            $_SESSION['_flash']['warning'] = sprintf(
+                'Heads up: %s is a public holiday (%s). Reviewers may ask you to pick another date.',
+                $date,
+                $check['holiday']['name']
+            );
+        }
     }
 
     public function submit(Request $request): Response

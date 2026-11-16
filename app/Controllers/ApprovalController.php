@@ -7,6 +7,7 @@ namespace App\Controllers;
 use App\Repositories\ApprovalHistoryRepository;
 use App\Repositories\RequestRepository;
 use App\Services\AuthService;
+use App\Services\HolidayService;
 use App\Services\WorkflowService;
 use FlowForge\Core\Request;
 use FlowForge\Core\Response;
@@ -55,6 +56,7 @@ class ApprovalController
             'title' => 'Reviewer Queue - FlowForge',
             'requests' => $pendingRequests,
             'user' => $user,
+            'holidayNames' => (new HolidayService())->namesForDates(array_map(fn($r) => $r->event_date, $pendingRequests)),
         ], 'layouts/main'));
     }
 

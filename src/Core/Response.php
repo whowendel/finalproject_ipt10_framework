@@ -34,9 +34,13 @@ class Response
         return new self($json !== false ? $json : '{}', $status, $headers);
     }
 
+    /**
+     * Redirect to an application path ("/requests") or an absolute URL.
+     * Application paths are prefixed with the install folder automatically.
+     */
     public static function redirect(string $url, int $status = 302, array $headers = []): self
     {
-        $headers['Location'] = $url;
+        $headers['Location'] = Url::to($url);
         return new self('', $status, $headers);
     }
 

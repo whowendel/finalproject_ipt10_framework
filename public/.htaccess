@@ -1,0 +1,14 @@
+# FlowForge front controller (Apache / XAMPP)
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # Serve real files (CSS, images) directly
+    RewriteCond %{REQUEST_FILENAME} -f [OR]
+    RewriteCond %{REQUEST_FILENAME} -d
+    RewriteRule ^ - [L]
+
+    # Everything else goes to index.php
+    RewriteRule ^ index.php [L]
+</IfModule>
+
+Options -Indexes

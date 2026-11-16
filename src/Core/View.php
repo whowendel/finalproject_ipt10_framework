@@ -37,6 +37,20 @@ class View
     }
 
     /**
+     * Application URL helper for templates: View::url('/requests'), or
+     * View::url() for the bare base path in href="<?= View::url() ?>/requests".
+     */
+    public static function url(string $path = ''): string
+    {
+        return self::e(Url::to($path));
+    }
+
+    public static function asset(string $path): string
+    {
+        return self::e(Url::asset($path));
+    }
+
+    /**
      * Render a view file inside an optional layout.
      */
     public static function render(string $template, array $data = [], ?string $layout = 'layouts/main'): string
@@ -48,7 +62,8 @@ class View
         }
 
         // Add view helper functions into scope
-        $data['user'] = $_SESSION['user'] ?? null;
+        // A user passed explicitly by the controller wins over the raw session array.
+        $data['user'] ??= $_SESSION['user'] ?? null;
         $data['flash'] = $_SESSION['_flash'] ?? [];
 
         // Extract variables for the template

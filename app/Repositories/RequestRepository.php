@@ -97,6 +97,27 @@ class RequestRepository
         return $results;
     }
 
+    /**
+     * Published content: approved requests, ordered by event date.
+     * @return ActivityRequest[]
+     */
+    public function findApproved(): array
+    {
+        $stmt = $this->pdo->query('
+            SELECT r.*, u.name AS submitter_name, u.email AS submitter_email
+            FROM activity_requests r
+            JOIN users u ON r.user_id = u.id
+            WHERE r.status = \'approved\'
+            ORDER BY r.event_date ASC
+        ');
+
+        $results = [];
+        while ($row = $stmt->fetch()) {
+            $results[] = new ActivityRequest($row);
+        }
+        return $results;
+    }
+
     public function create(array $data): int
     {
         $stmt = $this->pdo->prepare('

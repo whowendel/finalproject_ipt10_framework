@@ -43,7 +43,20 @@ class Request
     public static function capture(): self
     {
         $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
-        $uri = $_SERVER['REQUEST_URI'] ?? '/';
+        $path = rawurldecode((string)(parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?? '/'));
+
+        // Strip the install folder (e.g. "/IPT10 Final Project") so routes always see "/requests".
+        $configuredPath = trim((string)(parse_url((string)Config::get('url', ''), PHP_URL_PATH) ?? ''), '/');
+        $basePath = $configuredPath !== ''
+            ? '/' . $configuredPath
+            : Url::detectBasePath($_SERVER['SCRIPT_NAME'] ?? '', $path);
+        Url::setBasePath($basePath);
+
+        $basePath = Url::basePath();
+        if ($basePath !== '' && ($path === $basePath || str_starts_with($path, $basePath . '/'))) {
+            $path = substr($path, strlen($basePath));
+        }
+        $uri = $path === '' ? '/' : $path;
 
         // Query parameters
         $query = $_GET;
@@ -68,12 +81,15 @@ class Request
             $rawBody = null;
         }
 
-        return new self($method, $uri, $query, $post, $headers, $rawBody);
+        $request = new self($method, $uri, $query, $post, $headers, $rawBody);
+        Url::setCurrentPath($request->getPath());
+
+        return $request;
     }
 
     private function normalizePath(string $uri): string
     {
-        $path = parse_url($uri, PHP_URL_PATH) ?? '/';
+        $path = (string)(parse_url($uri, PHP_URL_PATH) ?? '/');
         $path = '/' . trim($path, '/');
         return $path === '' ? '/' : $path;
     }
@@ -185,6 +201,15 @@ class Request
     {
         $contentType = $this->header('content-type', '');
         return str_contains($contentType, 'application/json');
+    }
+
+    /**
+     * True when the client should receive JSON rather than an HTML page.
+     */
+    public function expectsJson(): bool
+    {
+        return $this->isApiRoute() || $this->isJson()
+            || str_contains((string)$this->header('accept', ''), 'application/json');
     }
 
     public function isApiRoute(): bool

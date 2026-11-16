@@ -20,6 +20,7 @@ require_once __DIR__ . '/RequestTest.php';
 require_once __DIR__ . '/ValidatorTest.php';
 require_once __DIR__ . '/WorkflowEngineTest.php';
 require_once __DIR__ . '/SecurityAndWorkflowIntegrationTest.php';
+require_once __DIR__ . '/FrameworkFeaturesTest.php';
 
 use FlowForge\Tests\TestCase;
 use FlowForge\Tests\RouterTest;
@@ -27,6 +28,7 @@ use FlowForge\Tests\RequestTest;
 use FlowForge\Tests\ValidatorTest;
 use FlowForge\Tests\WorkflowEngineTest;
 use FlowForge\Tests\SecurityAndWorkflowIntegrationTest;
+use FlowForge\Tests\FrameworkFeaturesTest;
 
 echo "====================================================\n";
 echo " FlowForge Microframework - Test Suite Execution\n";
@@ -40,6 +42,7 @@ $suites = [
     ValidatorTest::class,
     WorkflowEngineTest::class,
     SecurityAndWorkflowIntegrationTest::class,
+    FrameworkFeaturesTest::class,
 ];
 
 $startTime = microtime(true);

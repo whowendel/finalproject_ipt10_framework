@@ -1,0 +1,15 @@
+# Lets the project folder itself be opened in the browser (e.g. XAMPP htdocs/<project>/).
+# All requests are sent into public/, so source code, .env and storage/ are never served.
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteRule ^(.*)$ public/$1 [L]
+</IfModule>
+
+<IfModule !mod_rewrite.c>
+    # Without mod_rewrite, block direct access to everything except index.php
+    <FilesMatch "^(?!index\.php$).+">
+        Require all denied
+    </FilesMatch>
+</IfModule>
+
+Options -Indexes

@@ -5,21 +5,42 @@ declare(strict_types=1);
 require_once __DIR__ . '/../src/Core/Autoloader.php';
 \FlowForge\Core\Autoloader::register();
 
+use FlowForge\Core\Config;
 use FlowForge\Core\Database;
 
 echo "--- FlowForge Database Setup & Seeding ---\n";
 
-$config = require __DIR__ . '/../config/app.php';
-$dbPath = $config['database']['path'];
+Config::load(__DIR__ . '/../config/app.php');
+date_default_timezone_set((string)Config::get('timezone', 'UTC'));
+$driver = Database::driver();
 
-echo "Database path: {$dbPath}\n";
+if ($driver === 'mysql') {
+    // Create the database first if it does not exist yet.
+    $server = new PDO(
+        sprintf('mysql:host=%s;port=%d;charset=utf8mb4', Config::get('database.host'), (int)Config::get('database.port')),
+        (string)Config::get('database.username'),
+        (string)Config::get('database.password'),
+        [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]
+    );
+    $dbName = str_replace('`', '', (string)Config::get('database.database'));
+    $server->exec("CREATE DATABASE IF NOT EXISTS `{$dbName}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
+    echo "Database: MySQL `{$dbName}` on " . Config::get('database.host') . "\n";
+    $schemaFile = __DIR__ . '/schema.mysql.sql';
+} else {
+    echo "Database: SQLite " . Config::get('database.path') . "\n";
+    $schemaFile = __DIR__ . '/schema.sql';
+}
 
-$pdo = Database::connect($dbPath);
+$pdo = Database::connect();
+$dbPath = $driver === 'mysql' ? 'MySQL database ' . Config::get('database.database') : (string)Config::get('database.path');
 
-// Execute Schema
-$schemaSql = file_get_contents(__DIR__ . '/schema.sql');
-$pdo->exec($schemaSql);
-echo "[✓] Schema created successfully.\n";
+// Execute schema (one statement at a time so it works on both drivers)
+$schemaSql = (string)file_get_contents($schemaFile);
+$schemaSql = (string)preg_replace('/^\s*--.*$/m', '', $schemaSql);
+foreach (array_filter(array_map('trim', explode(';', $schemaSql))) as $statement) {
+    $pdo->exec($statement);
+}
+echo "[OK] Schema created successfully.\n";
 
 // Seed Users
 $stmt = $pdo->prepare('INSERT INTO users (name, email, password_hash, role, created_at) VALUES (:name, :email, :password_hash, :role, :created_at)');
@@ -54,7 +75,7 @@ $users = [
 foreach ($users as $user) {
     $stmt->execute($user);
 }
-echo "[✓] Seeded demo users.\n";
+echo "[OK] Seeded demo users.\n";
 echo "    - Submitter: student@flowforge.test / password123\n";
 echo "    - Reviewer:  reviewer@flowforge.test / password123\n";
 echo "    - Submitter: charlie@flowforge.test / password123\n";
@@ -83,7 +104,7 @@ $reqStmt->execute([
     'user_id' => 1,
     'title' => 'Annual Robotics Exhibition',
     'description' => 'Demonstration of autonomous robots built by the student robotics club.',
-    'event_date' => '2026-11-28',
+    'event_date' => '2026-11-30', // Bonifacio Day (shows the holiday API warning)
     'venue' => 'University Activity Center',
     'status' => 'submitted',
     'created_at' => date('Y-m-d H:i:s', strtotime('-3 days')),
@@ -166,5 +187,5 @@ $histStmt->execute([
     'created_at' => date('Y-m-d H:i:s', strtotime('-4 days')),
 ]);
 
-echo "[✓] Seeded sample requests and approval histories.\n";
+echo "[OK] Seeded sample requests and approval histories.\n";
 echo "Database ready at: {$dbPath}\n";

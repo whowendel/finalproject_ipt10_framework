@@ -8,8 +8,9 @@ use PDO;
 use PDOException;
 
 /**
- * PDO Connection Wrapper for SQLite.
- * Manages singleton connection, enforces foreign keys, and provides transactional controls.
+ * PDO connection manager.
+ * Supports SQLite (default, zero setup) and MySQL/MariaDB, selected with
+ * DB_DRIVER in .env. Keeps a single shared connection per request.
  */
 class Database
 {
@@ -17,16 +18,28 @@ class Database
     private static ?string $customPath = null;
 
     /**
-     * Set a custom path (useful for testing e.g. ':memory:').
+     * Force a specific SQLite path (useful for testing e.g. ':memory:').
      */
     public static function setPath(?string $path): void
     {
         self::$customPath = $path;
-        self::$instance = null; // Reset existing instance
+        self::$instance = null;
     }
 
     /**
-     * Get or create PDO instance.
+     * The configured driver name: "sqlite" or "mysql".
+     */
+    public static function driver(): string
+    {
+        if (self::$customPath !== null) {
+            return 'sqlite';
+        }
+        return strtolower((string)Config::get('database.driver', 'sqlite'));
+    }
+
+    /**
+     * Get or create the shared PDO instance.
+     * Passing $dbPath forces an SQLite connection to that file.
      */
     public static function connect(?string $dbPath = null): PDO
     {
@@ -34,44 +47,74 @@ class Database
             return self::$instance;
         }
 
-        if ($dbPath === null) {
-            $dbPath = self::$customPath;
-        }
-
-        if ($dbPath === null) {
-            $config = require dirname(__DIR__, 2) . '/config/app.php';
-            $dbPath = $config['database']['path'] ?? dirname(__DIR__, 2) . '/storage/database.sqlite';
-        }
-
-        if ($dbPath !== ':memory:') {
-            $dir = dirname($dbPath);
-            if (!is_dir($dir)) {
-                mkdir($dir, 0777, true);
-            }
-        }
-
-        $dsn = 'sqlite:' . $dbPath;
+        $dbPath ??= self::$customPath;
+        $driver = $dbPath !== null ? 'sqlite' : self::driver();
 
         try {
-            $pdo = new PDO($dsn, null, null, [
-                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
-                PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-                PDO::ATTR_EMULATE_PREPARES => false,
-            ]);
+            self::$instance = $driver === 'mysql'
+                ? self::connectMysql()
+                : self::connectSqlite($dbPath ?? (string)Config::get('database.path'));
 
-            // Enforce foreign key constraints in SQLite
-            $pdo->exec('PRAGMA foreign_keys = ON;');
-            $pdo->exec('PRAGMA journal_mode = WAL;');
-
-            self::$instance = $pdo;
             return self::$instance;
         } catch (PDOException $e) {
-            throw new \RuntimeException('Database connection failed: ' . $e->getMessage(), (int)$e->getCode(), $e);
+            throw new \RuntimeException('Database connection failed: ' . $e->getMessage(), 500, $e);
         }
     }
 
+    private static function options(): array
+    {
+        return [
+            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+            PDO::ATTR_EMULATE_PREPARES => false,
+        ];
+    }
+
+    private static function connectSqlite(string $path): PDO
+    {
+        if ($path !== ':memory:') {
+            // Relative paths (e.g. DB_PATH=storage/app.sqlite) are relative to the project root.
+            if (!preg_match('#^([a-zA-Z]:[\\\\/]|/|\\\\)#', $path)) {
+                $path = dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . $path;
+            }
+            $dir = dirname($path);
+            if (!is_dir($dir)) {
+                mkdir($dir, 0775, true);
+            }
+        }
+
+        $pdo = new PDO('sqlite:' . $path, null, null, self::options());
+
+        // SQLite needs foreign keys switched on per connection.
+        $pdo->exec('PRAGMA foreign_keys = ON;');
+        // Wait instead of failing immediately when another request holds a lock.
+        $pdo->exec('PRAGMA busy_timeout = 5000;');
+        // Default rollback journal: WAL's extra -wal/-shm files misbehave inside
+        // synced folders such as OneDrive or Dropbox.
+        $pdo->exec('PRAGMA journal_mode = DELETE;');
+
+        return $pdo;
+    }
+
+    private static function connectMysql(): PDO
+    {
+        $dsn = sprintf(
+            'mysql:host=%s;port=%d;dbname=%s;charset=utf8mb4',
+            Config::get('database.host', '127.0.0.1'),
+            (int)Config::get('database.port', 3306),
+            Config::get('database.database', 'flowforge')
+        );
+
+        return new PDO(
+            $dsn,
+            (string)Config::get('database.username', 'root'),
+            (string)Config::get('database.password', ''),
+            self::options()
+        );
+    }
+
     /**
-     * Reset connection instance.
+     * Reset the connection instance.
      */
     public static function disconnect(): void
     {
